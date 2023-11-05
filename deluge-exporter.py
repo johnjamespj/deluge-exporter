@@ -23,7 +23,7 @@ class DelugeCollector(object):
         except Exception as e:
             logging.error(e)
             return
-
+        
         # torrents by state
         deluge_torrent_state_count = prometheus_client.core.GaugeMetricFamily(
             "deluge_torrent_state_count", "Number of torrents by state", labels=["state"])
@@ -45,6 +45,15 @@ class DelugeCollector(object):
                 metric = prometheus_client.core.GaugeMetricFamily(
                     "deluge_" + key.lower(), "Deluge metric " + key)
                 metric.add_metric([], value)
+                yield metric
+
+        # torrents stats
+        torrents = self.process_torrents_stats(deluge_stats["torrents"])
+        for key, value in torrents.items():
+            for torrent in value:
+                metric = prometheus_client.core.GaugeMetricFamily(
+                    "deluge_" + key.lower(), "Deluge metric " + key + " by torrent", labels=["name", "state", "tracker_host"])
+                metric.add_metric([torrent[0], torrent[1], torrent[2]], torrent[3])
                 yield metric
 
     def get_deluge_stats(self) -> dict:
@@ -105,7 +114,21 @@ class DelugeCollector(object):
         # we use an incorrect label filter to avoid getting torrent data
         payload = {
             "method": "web.update_ui",
-            "params": [["label"], {"label": "fake_label"}],
+            "params": [[
+                "label", 
+                "name", 
+                "state",
+                "tracker_host",
+                "total_uploaded", 
+                "total_wanted", 
+                "total_done",
+                "download_payload_rate",
+                "upload_payload_rate",
+                "total_peers",
+                "total_seeds",
+                "num_peers",
+                "num_seeds",
+            ], {}],
             "id": 1
         }
         response = self.session.post(self.deluge_api_url, json=payload)
@@ -113,6 +136,33 @@ class DelugeCollector(object):
             raise Exception(f"Get stats error! Bad HTTP Code: {response.status_code} Response: {response.text}")
         response_json = response.json()
         return response_json["result"]
+    
+    def process_torrents_stats(self, torrents: list) -> dict:
+        res = {
+            "total_uploaded_bytes": [],
+            "total_wanted_bytes": [],
+            "total_done_bytes": [],
+            "download_payload_byte_rate": [],
+            "upload_payload_byte_rate": [],
+            "peers_total": [],
+            "seeds_total": [],
+            "peers_connected_total": [],
+            "seeds_connected_total": [],
+        }
+        
+        for torrent in torrents.values():
+            torrent["state"] = torrent["state"].lower()
+            res["total_uploaded_bytes"].append([torrent["name"], torrent["state"], torrent["tracker_host"], torrent["total_uploaded"]])
+            res["total_wanted_bytes"].append([torrent["name"], torrent["state"], torrent["tracker_host"], torrent["total_wanted"]])
+            res["total_done_bytes"].append([torrent["name"], torrent["state"], torrent["tracker_host"], torrent["total_done"]])
+            res["download_payload_byte_rate"].append([torrent["name"], torrent["state"], torrent["tracker_host"], torrent["download_payload_rate"]])
+            res["upload_payload_byte_rate"].append([torrent["name"], torrent["state"], torrent["tracker_host"], torrent["upload_payload_rate"]])
+            res["peers_total"].append([torrent["name"], torrent["state"], torrent["tracker_host"], torrent["total_peers"]])
+            res["seeds_total"].append([torrent["name"], torrent["state"], torrent["tracker_host"], torrent["total_seeds"]])
+            res["peers_connected_total"].append([torrent["name"], torrent["state"], torrent["tracker_host"], torrent["num_peers"]])
+            res["seeds_connected_total"].append([torrent["name"], torrent["state"], torrent["tracker_host"], torrent["num_seeds"]])
+
+        return res
 
 
 def main():
